@@ -1,0 +1,30 @@
+###############################################################
+# terraform/terraform.tfvars.example
+# Copy to terraform.tfvars and fill in your values.
+# ⚠ NEVER commit terraform.tfvars to git — it's in .gitignore.
+###############################################################
+
+aws_region         = "us-east-1"
+project_name       = "hermes-agent"
+environment        = "production"
+
+# Choose your instance size (see variables.tf for guidance)
+instance_type      = "t3.medium"
+
+# Paste your public key: cat ~/.ssh/id_ed25519.pub
+ssh_public_key     = "ssh-ed25519 AAAAC3... your-email@example.com"
+
+# Lock SSH to YOUR IP only (safer): curl ifconfig.me
+allowed_ssh_cidrs  = ["0.0.0.0/0"]
+
+# Your forked/cloned repo
+github_repo        = "your-username/hermes-ec2"
+
+# Get a free key at https://openrouter.ai
+openrouter_api_key = "sk-or-v1-..."
+
+# Any model on OpenRouter — examples:
+# "openrouter:anthropic/claude-sonnet-4-5"
+# "openrouter:openai/gpt-4o"
+# "openrouter:meta-llama/llama-3.3-70b-instruct"
+hermes_model       = "openrouter:anthropic/claude-sonnet-4-5"
