@@ -1,0 +1,29 @@
+# Secrets — NEVER commit these
+.env
+*.tfvars
+!*.tfvars.example
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/tfplan
+
+# Terraform state (use remote backend in production)
+*.tfstate
+*.tfstate.backup
+
+# SSH keys
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Docker
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db

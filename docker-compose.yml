@@ -1,0 +1,43 @@
+###############################################################
+# docker-compose.yml
+###############################################################
+version: "3.9"
+
+services:
+  hermes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hermes-agent
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persistent memory, skills, and config survive container restarts
+      - hermes_home:/root/.hermes
+      # Docker socket — lets Hermes spawn Docker sub-agents
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # ── Provider keys ─────────────────────────────────────
+      # Set via .env file or GitHub Secrets → injected at deploy time
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+
+      # ── Hermes settings ───────────────────────────────────
+      - HERMES_MODEL=${HERMES_MODEL:-openrouter:anthropic/claude-sonnet-4-5}
+      - HERMES_GATEWAY_HOST=0.0.0.0
+      - HERMES_GATEWAY_PORT=8080
+
+      # ── Optional integrations ─────────────────────────────
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+volumes:
+  hermes_home:
+    driver: local

@@ -1,0 +1,48 @@
+###############################################################
+# hermes-config.yaml
+# Hermes Agent configuration — mounted into the container.
+# Edit this file and redeploy to change Hermes behaviour.
+###############################################################
+
+# ── Model ─────────────────────────────────────────────────────
+# Override with HERMES_MODEL env var, or set here.
+# Examples:
+#   openrouter:anthropic/claude-sonnet-4-5
+#   openrouter:openai/gpt-4o
+#   openrouter:meta-llama/llama-3.3-70b-instruct
+#   openai:gpt-4o
+model: "openrouter:anthropic/claude-sonnet-4-5"
+
+# ── Gateway (web / messaging) ─────────────────────────────────
+gateway:
+  host: "0.0.0.0"
+  port: 8080
+  # Enable Telegram bot (set TELEGRAM_BOT_TOKEN env var)
+  telegram:
+    enabled: false
+  # Enable Discord bot (set DISCORD_BOT_TOKEN env var)
+  discord:
+    enabled: false
+
+# ── Memory ────────────────────────────────────────────────────
+memory:
+  enabled: true
+  # How often Hermes auto-saves memory (minutes)
+  autosave_interval: 30
+
+# ── Terminal backend ──────────────────────────────────────────
+# local = run commands in container
+# docker = spawn isolated sub-containers (docker socket must be mounted)
+terminal_backend: "local"
+
+# ── Tools ─────────────────────────────────────────────────────
+tools:
+  web_search: true
+  browser: false      # Enable if you add playwright to the image
+  image_gen: false
+  tts: false
+
+# ── Skills ────────────────────────────────────────────────────
+skills:
+  auto_create: true   # Hermes creates skills from experience
+  auto_improve: true  # Hermes improves skills during use
