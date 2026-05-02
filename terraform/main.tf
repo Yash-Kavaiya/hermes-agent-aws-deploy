@@ -1,5 +1,5 @@
 ###############################################################
-# Hermes Agent — AWS EC2 Deployment
+# Hermes Agent — AWS EC2 + ECS Deployment
 # terraform/main.tf
 ###############################################################
 
@@ -12,16 +12,6 @@ terraform {
       version = "~> 5.0"
     }
   }
-
-  # ─── Remote State (optional but recommended) ───────────────
-  # Uncomment after creating your S3 bucket + DynamoDB table.
-  # backend "s3" {
-  #   bucket         = "YOUR-BUCKET-NAME-terraform-state"
-  #   key            = "hermes-agent/terraform.tfstate"
-  #   region         = var.aws_region
-  #   dynamodb_table = "terraform-locks"
-  #   encrypt        = true
-  # }
 }
 
 provider "aws" {
@@ -47,7 +37,7 @@ data "aws_ami" "ubuntu" {
 }
 
 ###############################################################
-# VPC — use the default VPC for simplicity
+# VPC — use the default VPC
 ###############################################################
 data "aws_vpc" "default" {
   default = true
@@ -61,9 +51,11 @@ data "aws_subnets" "default" {
 }
 
 ###############################################################
-# Key Pair — import your public key
+# Key Pair — only created if ssh_public_key is provided
+# In CloudShell / CI, skip by leaving ssh_public_key empty
 ###############################################################
 resource "aws_key_pair" "hermes" {
+  count      = var.ssh_public_key != "" ? 1 : 0
   key_name   = "${var.project_name}-key"
   public_key = var.ssh_public_key
 }
@@ -76,7 +68,6 @@ resource "aws_security_group" "hermes" {
   description = "Hermes Agent security group"
   vpc_id      = data.aws_vpc.default.id
 
-  # SSH — restrict to your IP in production!
   ingress {
     description = "SSH"
     from_port   = 22
@@ -85,7 +76,6 @@ resource "aws_security_group" "hermes" {
     cidr_blocks = var.allowed_ssh_cidrs
   }
 
-  # HTTP — Nginx → Hermes web gateway
   ingress {
     description = "HTTP"
     from_port   = 80
@@ -94,7 +84,6 @@ resource "aws_security_group" "hermes" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # HTTPS
   ingress {
     description = "HTTPS"
     from_port   = 443
@@ -103,7 +92,6 @@ resource "aws_security_group" "hermes" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Hermes gateway port (direct access, optional)
   ingress {
     description = "Hermes gateway"
     from_port   = 8080
@@ -123,7 +111,7 @@ resource "aws_security_group" "hermes" {
 }
 
 ###############################################################
-# IAM Role — lets EC2 use SSM (no SSH keys needed in CI/CD)
+# IAM Role — EC2 instance role for SSM
 ###############################################################
 resource "aws_iam_role" "hermes_ec2" {
   name = "${var.project_name}-ec2-role"
@@ -156,36 +144,34 @@ resource "aws_iam_instance_profile" "hermes" {
 resource "aws_instance" "hermes" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
-  key_name               = aws_key_pair.hermes.key_name
+  key_name               = var.ssh_public_key != "" ? aws_key_pair.hermes[0].key_name : null
   subnet_id              = tolist(data.aws_subnets.default.ids)[0]
   vpc_security_group_ids = [aws_security_group.hermes.id]
   iam_instance_profile   = aws_iam_instance_profile.hermes.name
 
   root_block_device {
     volume_type           = "gp3"
-    volume_size           = 30   # GB — enough for Hermes + Docker images
+    volume_size           = 30
     delete_on_termination = true
     encrypted             = true
   }
 
-  # Cloud-init bootstrap — installs Docker, pulls repo, starts Hermes
   user_data = templatefile("${path.module}/userdata.sh.tpl", {
-    project_name  = var.project_name
-    github_repo   = var.github_repo
+    project_name   = var.project_name
+    github_repo    = var.github_repo
     openrouter_key = var.openrouter_api_key
-    hermes_model  = var.hermes_model
+    hermes_model   = var.hermes_model
   })
 
   tags = merge(local.common_tags, { Name = var.project_name })
 
   lifecycle {
-    # Prevent accidental replacement when AMI updates
     ignore_changes = [ami, user_data]
   }
 }
 
 ###############################################################
-# Elastic IP — your permanent public address
+# Elastic IP
 ###############################################################
 resource "aws_eip" "hermes" {
   instance = aws_instance.hermes.id

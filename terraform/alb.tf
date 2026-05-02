@@ -1,14 +1,25 @@
 ###############################################################
 # Application Load Balancer for Hermes Agent (ECS/Fargate)
-# Note: The existing aws_security_group "hermes" in main.tf is
-# for the EC2 deployment. This file uses distinct names.
 ###############################################################
 
-# Public subnets across 2 AZs (for ALB + Fargate)
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+# Look up the existing IGW attached to the default VPC instead of creating a new one
+data "aws_internet_gateway" "default" {
+  filter {
+    name   = "attachment.vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
+# Public subnets — use /20 blocks from 172.31.x.x range to avoid conflict with default VPC 10.0.x.x
+# Default VPC in us-east-1 typically uses 172.31.0.0/16
 resource "aws_subnet" "public" {
   count             = 2
   vpc_id            = data.aws_vpc.default.id
-  cidr_block        = "10.0.${count.index + 10}.0/24"
+  cidr_block        = "172.31.${count.index + 96}.0/24"
   availability_zone = data.aws_availability_zones.available.names[count.index]
 
   map_public_ip_on_launch = true
@@ -16,24 +27,13 @@ resource "aws_subnet" "public" {
   tags = { Name = "hermes-public-${count.index}", Project = "hermes-agent" }
 }
 
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
-# Internet Gateway (attach to default VPC)
-resource "aws_internet_gateway" "hermes" {
-  vpc_id = data.aws_vpc.default.id
-
-  tags = { Name = "hermes-igw" }
-}
-
-# Route table → internet for the new public subnets
+# Route table for the new public subnets — point to the EXISTING IGW
 resource "aws_route_table" "hermes_public" {
   vpc_id = data.aws_vpc.default.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.hermes.id
+    gateway_id = data.aws_internet_gateway.default.id
   }
 
   tags = { Name = "hermes-public-rt" }
@@ -45,7 +45,7 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.hermes_public.id
 }
 
-# Security Group: ALB (distinct name from EC2 SG in main.tf)
+# Security Group: ALB
 resource "aws_security_group" "alb" {
   name        = "hermes-alb-sg"
   description = "Allow HTTP/HTTPS inbound to ALB"
@@ -75,7 +75,7 @@ resource "aws_security_group" "alb" {
   tags = { Name = "hermes-alb-sg" }
 }
 
-# Security Group: ECS Tasks (distinct name — "ecs_tasks" not "hermes")
+# Security Group: ECS Tasks
 resource "aws_security_group" "ecs_tasks" {
   name        = "hermes-ecs-sg"
   description = "Allow traffic from ALB to ECS tasks on port 8080"
