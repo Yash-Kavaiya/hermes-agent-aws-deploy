@@ -3,7 +3,6 @@
 ###############################################################
 data "aws_caller_identity" "current" {}
 
-# Reuse existing OIDC provider (already exists in this account)
 data "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 }
@@ -130,23 +129,30 @@ resource "aws_iam_role_policy" "ecs_bedrock" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "BedrockInvoke"
+        Sid    = "BedrockInvokeModels"
         Effect = "Allow"
         Action = [
           "bedrock:InvokeModel",
           "bedrock:InvokeModelWithResponseStream",
-          "bedrock:ListFoundationModels",
-          "bedrock:GetFoundationModel"
+          "bedrock:Converse",
+          "bedrock:ConverseStream"
         ]
-        # Active model ARNs — updated May 2026
+        # Allow all foundation models + cross-region inference profiles
         Resource = [
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/anthropic.claude-3-5-sonnet-20240620-v1:0",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/anthropic.claude-3-opus-20240229-v1:0",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.nova-pro-v1:0",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.nova-lite-v1:0",
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/meta.llama3-70b-instruct-v1:0"
+          "arn:aws:bedrock:*::foundation-model/*",
+          "arn:aws:bedrock:us-east-1:${data.aws_caller_identity.current.account_id}:inference-profile/*"
         ]
+      },
+      {
+        Sid    = "BedrockListModels"
+        Effect = "Allow"
+        Action = [
+          "bedrock:ListFoundationModels",
+          "bedrock:GetFoundationModel",
+          "bedrock:ListInferenceProfiles",
+          "bedrock:GetInferenceProfile"
+        ]
+        Resource = "*"
       },
       {
         Sid    = "SSMSecrets"
@@ -164,6 +170,6 @@ output "github_actions_role_arn" {
 }
 
 output "ecs_task_role_arn" {
-  description = "ARN of the ECS task role (has Bedrock permissions)"
+  description = "ARN of the ECS task role (has Bedrock + inference profile permissions)"
   value       = aws_iam_role.ecs_task.arn
 }

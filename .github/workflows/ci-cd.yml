@@ -13,8 +13,9 @@ env:
   ECS_CLUSTER: hermes-cluster
   ECS_SERVICE: hermes-service
   CONTAINER_NAME: hermes-agent
-  # Active Claude model as of May 2026
-  HERMES_MODEL: "bedrock:anthropic.claude-3-5-sonnet-20240620-v1:0"
+  # Claude Sonnet 4.5 via cross-region inference profile
+  # Uses us.* prefix — auto-routes across us-east-1/us-west-2/us-east-2
+  HERMES_MODEL: "bedrock:arn:aws:bedrock:us-east-1:502682267359:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
 permissions:
   id-token: write
@@ -22,7 +23,7 @@ permissions:
   security-events: write
 
 jobs:
-  # ─────────────────────────────────────────────────────────────
+  # ────────────────────────────────────────────────────────────
   lint-and-scan:
     name: Lint & Security Scan
     runs-on: ubuntu-latest
@@ -71,7 +72,7 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
-  # ─────────────────────────────────────────────────────────────
+  # ────────────────────────────────────────────────────────────
   build-and-push:
     name: Build & Push to ECR
     runs-on: ubuntu-latest
@@ -120,7 +121,7 @@ jobs:
           SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
           echo "image-uri=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-${SHORT_SHA}" >> $GITHUB_OUTPUT
 
-  # ─────────────────────────────────────────────────────────────
+  # ────────────────────────────────────────────────────────────
   terraform:
     name: Terraform Infrastructure
     runs-on: ubuntu-latest
@@ -154,7 +155,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: terraform apply -auto-approve tfplan
 
-  # ─────────────────────────────────────────────────────────────
+  # ────────────────────────────────────────────────────────────
   deploy-ecs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
@@ -210,10 +211,10 @@ jobs:
           echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Image | ${{ needs.build-and-push.outputs.image-uri }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Model | ${{ env.HERMES_MODEL }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Model | Claude Sonnet 4.5 (cross-region inference profile) |" >> $GITHUB_STEP_SUMMARY
           echo "| URL | http://hermes-alb-1968737363.us-east-1.elb.amazonaws.com |" >> $GITHUB_STEP_SUMMARY
 
-  # ─────────────────────────────────────────────────────────────
+  # ────────────────────────────────────────────────────────────
   smoke-test:
     name: Smoke Test
     runs-on: ubuntu-latest

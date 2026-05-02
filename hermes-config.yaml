@@ -1,19 +1,16 @@
 ###############################################################
 # hermes-config.yaml
 # Using AWS Bedrock — auth via IAM Task Role, no API key needed.
+# Model: Claude Sonnet 4.5 via cross-region inference profile
 ###############################################################
 
-# ── Model ─────────────────────────────────────────────────
-# Active Bedrock model IDs (as of May 2026):
-#   bedrock:anthropic.claude-3-5-sonnet-20240620-v1:0   (Claude 3.5 Sonnet — active)
-#   bedrock:anthropic.claude-3-5-haiku-20241022-v1:0    (Claude 3.5 Haiku)
-#   bedrock:anthropic.claude-3-opus-20240229-v1:0       (Claude 3 Opus)
-#   bedrock:amazon.nova-pro-v1:0                        (Amazon Nova Pro)
-#   bedrock:amazon.nova-lite-v1:0                       (Amazon Nova Lite)
-#   bedrock:meta.llama3-70b-instruct-v1:0               (Llama 3 70B)
-model: "bedrock:anthropic.claude-3-5-sonnet-20240620-v1:0"
+# ── Model ────────────────────────────────────────────────────
+# Cross-region inference profile ARN (us.*) automatically routes
+# traffic across us-east-1, us-west-2, us-east-2 for higher
+# throughput and resilience.
+model: "bedrock:arn:aws:bedrock:us-east-1:502682267359:inference-profile/us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
-# ── Gateway ───────────────────────────────────────────────
+# ── Gateway ──────────────────────────────────────────────────
 gateway:
   host: "0.0.0.0"
   port: 8080
@@ -22,7 +19,7 @@ gateway:
   discord:
     enabled: false
 
-# ── Memory ──────────────────────────────────────────────
+# ── Memory ───────────────────────────────────────────────────
 memory:
   enabled: true
   autosave_interval: 30
