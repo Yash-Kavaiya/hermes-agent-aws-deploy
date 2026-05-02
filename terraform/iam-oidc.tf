@@ -1,20 +1,16 @@
 ###############################################################
 # GitHub Actions OIDC Role — keyless authentication to AWS
-# No long-lived access keys needed in GitHub Secrets!
 ###############################################################
 data "aws_caller_identity" "current" {}
 
-# Trust the GitHub OIDC provider
 resource "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 
   client_id_list = ["sts.amazonaws.com"]
 
-  # GitHub's OIDC thumbprint (stable)
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
 
-# IAM Role assumed by GitHub Actions
 resource "aws_iam_role" "github_actions" {
   name = "hermes-github-actions-role"
 
@@ -32,7 +28,6 @@ resource "aws_iam_role" "github_actions" {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
           }
           StringLike = {
-            # Restrict to your repo only
             "token.actions.githubusercontent.com:sub" = "repo:Yash-Kavaiya/hermes-agent-aws-deploy:*"
           }
         }
@@ -46,7 +41,6 @@ resource "aws_iam_role" "github_actions" {
   }
 }
 
-# Policy: ECR push/pull + ECS deploy + ALB describe
 resource "aws_iam_role_policy" "github_actions_policy" {
   name = "hermes-github-actions-policy"
   role = aws_iam_role.github_actions.id
@@ -55,9 +49,9 @@ resource "aws_iam_role_policy" "github_actions_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ECRAuth"
-        Effect = "Allow"
-        Action = ["ecr:GetAuthorizationToken"]
+        Sid      = "ECRAuth"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
         Resource = "*"
       },
       {
@@ -90,15 +84,15 @@ resource "aws_iam_role_policy" "github_actions_policy" {
         Resource = "*"
       },
       {
-        Sid    = "IAMPassRole"
-        Effect = "Allow"
-        Action = ["iam:PassRole"]
+        Sid      = "IAMPassRole"
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/hermes-*"
       },
       {
-        Sid    = "ELBDescribe"
-        Effect = "Allow"
-        Action = ["elasticloadbalancing:DescribeLoadBalancers"]
+        Sid      = "ELBDescribe"
+        Effect   = "Allow"
+        Action   = ["elasticloadbalancing:DescribeLoadBalancers"]
         Resource = "*"
       },
       {

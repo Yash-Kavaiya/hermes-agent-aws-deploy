@@ -61,15 +61,15 @@ resource "aws_ecs_task_definition" "hermes" {
   family                   = "hermes-agent"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "512"   # 0.5 vCPU
-  memory                   = "1024"  # 1 GB
+  cpu                      = "512"
+  memory                   = "1024"
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
   task_role_arn            = aws_iam_role.ecs_task_execution.arn
 
   container_definitions = jsonencode([
     {
-      name  = "hermes-agent"
-      image = "${aws_ecr_repository.hermes.repository_url}:latest"
+      name      = "hermes-agent"
+      image     = "${aws_ecr_repository.hermes.repository_url}:latest"
       essential = true
 
       portMappings = [{
@@ -118,7 +118,7 @@ resource "aws_ecs_service" "hermes" {
 
   network_configuration {
     subnets          = aws_subnet.public[*].id
-    security_groups  = [aws_security_group.hermes.id]
+    security_groups  = [aws_security_group.ecs_tasks.id]
     assign_public_ip = true
   }
 

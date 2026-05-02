@@ -1,27 +1,14 @@
 ###############################################################
-# Application Load Balancer for Hermes Agent
+# Application Load Balancer for Hermes Agent (ECS/Fargate)
+# Note: The existing aws_security_group "hermes" in main.tf is
+# for the EC2 deployment. This file uses distinct names.
 ###############################################################
 
-# VPC (if not already defined in main.tf — adjust as needed)
-resource "aws_vpc" "hermes" {
-  count      = var.create_vpc ? 1 : 0
-  cidr_block = "10.0.0.0/16"
-
-  enable_dns_hostnames = true
-  enable_dns_support   = true
-
-  tags = { Name = "hermes-vpc", Project = "hermes-agent" }
-}
-
-locals {
-  vpc_id = var.create_vpc ? aws_vpc.hermes[0].id : var.existing_vpc_id
-}
-
-# Public subnets across 2 AZs
+# Public subnets across 2 AZs (for ALB + Fargate)
 resource "aws_subnet" "public" {
   count             = 2
-  vpc_id            = local.vpc_id
-  cidr_block        = "10.0.${count.index}.0/24"
+  vpc_id            = data.aws_vpc.default.id
+  cidr_block        = "10.0.${count.index + 10}.0/24"
   availability_zone = data.aws_availability_zones.available.names[count.index]
 
   map_public_ip_on_launch = true
@@ -33,22 +20,20 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# Internet Gateway
+# Internet Gateway (attach to default VPC)
 resource "aws_internet_gateway" "hermes" {
-  count  = var.create_vpc ? 1 : 0
-  vpc_id = local.vpc_id
+  vpc_id = data.aws_vpc.default.id
 
   tags = { Name = "hermes-igw" }
 }
 
-# Route table → internet
-resource "aws_route_table" "public" {
-  count  = var.create_vpc ? 1 : 0
-  vpc_id = local.vpc_id
+# Route table → internet for the new public subnets
+resource "aws_route_table" "hermes_public" {
+  vpc_id = data.aws_vpc.default.id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.hermes[0].id
+    gateway_id = aws_internet_gateway.hermes.id
   }
 
   tags = { Name = "hermes-public-rt" }
@@ -57,14 +42,14 @@ resource "aws_route_table" "public" {
 resource "aws_route_table_association" "public" {
   count          = 2
   subnet_id      = aws_subnet.public[count.index].id
-  route_table_id = var.create_vpc ? aws_route_table.public[0].id : var.existing_route_table_id
+  route_table_id = aws_route_table.hermes_public.id
 }
 
-# Security Group: ALB
+# Security Group: ALB (distinct name from EC2 SG in main.tf)
 resource "aws_security_group" "alb" {
   name        = "hermes-alb-sg"
   description = "Allow HTTP/HTTPS inbound to ALB"
-  vpc_id      = local.vpc_id
+  vpc_id      = data.aws_vpc.default.id
 
   ingress {
     from_port   = 80
@@ -90,11 +75,11 @@ resource "aws_security_group" "alb" {
   tags = { Name = "hermes-alb-sg" }
 }
 
-# Security Group: ECS Tasks
-resource "aws_security_group" "hermes" {
+# Security Group: ECS Tasks (distinct name — "ecs_tasks" not "hermes")
+resource "aws_security_group" "ecs_tasks" {
   name        = "hermes-ecs-sg"
-  description = "Allow traffic from ALB to ECS tasks"
-  vpc_id      = local.vpc_id
+  description = "Allow traffic from ALB to ECS tasks on port 8080"
+  vpc_id      = data.aws_vpc.default.id
 
   ingress {
     from_port       = 8080
@@ -131,8 +116,8 @@ resource "aws_lb_target_group" "hermes" {
   name        = "hermes-tg"
   port        = 8080
   protocol    = "HTTP"
-  vpc_id      = local.vpc_id
-  target_type = "ip"  # Required for Fargate
+  vpc_id      = data.aws_vpc.default.id
+  target_type = "ip"
 
   health_check {
     enabled             = true
@@ -147,7 +132,7 @@ resource "aws_lb_target_group" "hermes" {
   tags = { Project = "hermes-agent" }
 }
 
-# ALB Listener (HTTP → forward)
+# ALB Listener
 resource "aws_lb_listener" "hermes" {
   load_balancer_arn = aws_lb.hermes.arn
   port              = 80

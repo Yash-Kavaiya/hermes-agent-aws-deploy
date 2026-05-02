@@ -11,25 +11,6 @@ terraform {
     encrypt        = true
     dynamodb_table = "hermes-terraform-locks"
   }
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-
-  required_version = ">= 1.7.0"
 }
-
-provider "aws" {
-  region = var.aws_region
-
-  default_tags {
-    tags = {
-      Project     = "hermes-agent"
-      Repository  = "Yash-Kavaiya/hermes-agent-aws-deploy"
-      ManagedBy   = "terraform"
-    }
-  }
-}
+# NOTE: required_providers and provider "aws" blocks live in main.tf
+# to avoid duplicate configuration errors.
