@@ -1,8 +1,8 @@
 ###############################################################
 # ECS Fargate — runs the Hermes Agent container
+# Auth to Bedrock is via IAM Task Role — no API keys needed
 ###############################################################
 
-# ECS Cluster
 resource "aws_ecs_cluster" "hermes" {
   name = "hermes-cluster"
 
@@ -14,15 +14,13 @@ resource "aws_ecs_cluster" "hermes" {
   tags = { Project = "hermes-agent", ManagedBy = "terraform" }
 }
 
-# CloudWatch log group for container logs
 resource "aws_cloudwatch_log_group" "hermes" {
   name              = "/ecs/hermes-agent"
   retention_in_days = 14
-
-  tags = { Project = "hermes-agent" }
+  tags              = { Project = "hermes-agent" }
 }
 
-# ECS Task Execution Role
+# Task Execution Role (pull image from ECR, write logs)
 resource "aws_iam_role" "ecs_task_execution" {
   name = "hermes-ecs-task-execution-role"
 
@@ -41,22 +39,9 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# Allow task to pull secrets from SSM Parameter Store
-resource "aws_iam_role_policy" "ecs_ssm" {
-  name = "hermes-ecs-ssm-policy"
-  role = aws_iam_role.ecs_task_execution.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["ssm:GetParameters", "ssm:GetParameter"]
-      Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/hermes/*"
-    }]
-  })
-}
-
 # ECS Task Definition
+# task_role_arn  = ecs_task role (Bedrock + SSM access, used AT RUNTIME)
+# execution_role = ecs_task_execution role (ECR pull + CloudWatch, used at LAUNCH)
 resource "aws_ecs_task_definition" "hermes" {
   family                   = "hermes-agent"
   network_mode             = "awsvpc"
@@ -64,7 +49,7 @@ resource "aws_ecs_task_definition" "hermes" {
   cpu                      = "512"
   memory                   = "1024"
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
-  task_role_arn            = aws_iam_role.ecs_task_execution.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn  # <-- Bedrock access
 
   container_definitions = jsonencode([
     {
@@ -78,11 +63,15 @@ resource "aws_ecs_task_definition" "hermes" {
       }]
 
       environment = [
-        { name = "PYTHONUNBUFFERED", value = "1" }
+        { name = "PYTHONUNBUFFERED",  value = "1" },
+        { name = "AWS_REGION",        value = var.aws_region },
+        # Tells Hermes to use Bedrock — auth comes from the IAM task role
+        { name = "HERMES_MODEL",      value = "bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0" },
+        { name = "AWS_DEFAULT_REGION", value = var.aws_region }
       ]
 
+      # Only Telegram token is a secret — Bedrock needs NO API key
       secrets = [
-        { name = "OPENAI_API_KEY",      valueFrom = "/hermes/openai_api_key" },
         { name = "TELEGRAM_BOT_TOKEN", valueFrom = "/hermes/telegram_bot_token" }
       ]
 
@@ -108,7 +97,6 @@ resource "aws_ecs_task_definition" "hermes" {
   tags = { Project = "hermes-agent", ManagedBy = "terraform" }
 }
 
-# ECS Fargate Service
 resource "aws_ecs_service" "hermes" {
   name            = "hermes-service"
   cluster         = aws_ecs_cluster.hermes.id

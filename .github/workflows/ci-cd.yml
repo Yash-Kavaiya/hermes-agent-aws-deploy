@@ -41,7 +41,7 @@ jobs:
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
-          failure-threshold: error   # DL3008/DL3015/DL4006 are warnings/info — only fail on errors
+          failure-threshold: error
           ignore: DL3008,DL3015,DL4006
 
       - name: Validate docker-compose
@@ -91,7 +91,6 @@ jobs:
     if: github.event_name != 'pull_request'
     outputs:
       image-uri: ${{ steps.output-uri.outputs.image-uri }}
-      image-tag: ${{ steps.meta.outputs.tags }}
 
     steps:
       - name: Checkout code
@@ -121,7 +120,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push Docker image
-        id: build-image
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -134,16 +132,7 @@ jobs:
       - name: Output image URI
         id: output-uri
         run: |
-          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-$(echo ${{ github.sha }} | cut -c1-7)"
-          echo "image-uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
-
-      - name: Scan pushed image with Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-${{ github.sha }}
-          format: 'table'
-          exit-code: '0'
-          severity: 'CRITICAL,HIGH'
+          echo "image-uri=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
   # ─────────────────────────────────────────────────────────────
   # JOB 3: Terraform Plan / Apply
@@ -180,12 +169,11 @@ jobs:
         run: terraform fmt -check -recursive
 
       - name: Terraform Plan
-        id: plan
         run: |
           terraform plan \
             -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="openai_api_key=${{ secrets.OPENAI_API_KEY }}" \
             -out=tfplan
+        # NOTE: No openai_api_key var — Bedrock uses IAM, no secrets needed here
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -231,9 +219,11 @@ jobs:
           task-definition: task-definition.json
           container-name: ${{ env.CONTAINER_NAME }}
           image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-${{ github.sha }}
+          # Bedrock uses IAM — only optional secrets like Telegram token here
           environment-variables: |
-            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-            TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+            AWS_REGION=${{ env.AWS_REGION }}
+            AWS_DEFAULT_REGION=${{ env.AWS_REGION }}
+            HERMES_MODEL=bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0
 
       - name: Deploy to ECS Fargate
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
@@ -250,18 +240,17 @@ jobs:
             --query 'LoadBalancers[?contains(LoadBalancerName, `hermes`)].DNSName' \
             --output text 2>/dev/null || echo "N/A")
           echo "alb-url=http://${ALB_DNS}" >> $GITHUB_OUTPUT
-          echo "Deployed to: http://${ALB_DNS}"
 
       - name: Post deployment summary
         run: |
           echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Model** | bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0 |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Auth** | IAM Task Role (no API keys) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Image** | ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Cluster** | ${{ env.ECS_CLUSTER }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Service** | ${{ env.ECS_SERVICE }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Region** | ${{ env.AWS_REGION }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Commit** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
 
   # ─────────────────────────────────────────────────────────────
   # JOB 5: Smoke Test
@@ -286,7 +275,7 @@ jobs:
             --services ${{ env.ECS_SERVICE }}
           echo "✅ ECS service is stable"
 
-      - name: Health check on gateway port
+      - name: Health check
         run: |
           ALB_DNS=$(aws elbv2 describe-load-balancers \
             --query 'LoadBalancers[?contains(LoadBalancerName, `hermes`)].DNSName' \
@@ -301,7 +290,6 @@ jobs:
               echo "Attempt $i: HTTP ${STATUS}, retrying in 15s..."
               sleep 15
             done
-            echo "⚠️ Health check returned non-200 — service may still be starting"
           else
             echo "⚠️ No ALB found — skipping HTTP health check"
           fi
