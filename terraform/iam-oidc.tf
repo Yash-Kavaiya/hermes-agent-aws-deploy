@@ -3,7 +3,7 @@
 ###############################################################
 data "aws_caller_identity" "current" {}
 
-# Import existing OIDC provider instead of trying to create a duplicate
+# Reuse existing OIDC provider (already exists in this account)
 data "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 }
@@ -105,7 +105,7 @@ resource "aws_iam_role_policy" "github_actions_policy" {
 }
 
 ###############################################################
-# ECS Task Role — grants Bedrock + SSM access to the container
+# ECS Task Role — Bedrock + SSM access at container runtime
 ###############################################################
 resource "aws_iam_role" "ecs_task" {
   name = "hermes-ecs-task-role"
@@ -138,8 +138,9 @@ resource "aws_iam_role_policy" "ecs_bedrock" {
           "bedrock:ListFoundationModels",
           "bedrock:GetFoundationModel"
         ]
+        # Active model ARNs — updated May 2026
         Resource = [
-          "arn:aws:bedrock:${var.aws_region}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/anthropic.claude-3-5-sonnet-20240620-v1:0",
           "arn:aws:bedrock:${var.aws_region}::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0",
           "arn:aws:bedrock:${var.aws_region}::foundation-model/anthropic.claude-3-opus-20240229-v1:0",
           "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.nova-pro-v1:0",

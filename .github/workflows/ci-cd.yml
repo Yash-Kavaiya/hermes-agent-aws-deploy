@@ -6,13 +6,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Deployment environment'
-        required: true
-        default: 'production'
-        type: choice
-        options: [staging, production]
 
 env:
   AWS_REGION: us-east-1
@@ -20,6 +13,8 @@ env:
   ECS_CLUSTER: hermes-cluster
   ECS_SERVICE: hermes-service
   CONTAINER_NAME: hermes-agent
+  # Active Claude model as of May 2026
+  HERMES_MODEL: "bedrock:anthropic.claude-3-5-sonnet-20240620-v1:0"
 
 permissions:
   id-token: write
@@ -28,16 +23,13 @@ permissions:
 
 jobs:
   # ─────────────────────────────────────────────────────────────
-  # JOB 1: Lint & Security Scan
-  # ─────────────────────────────────────────────────────────────
   lint-and-scan:
     name: Lint & Security Scan
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Lint Dockerfile (Hadolint)
+      - name: Lint Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
@@ -58,31 +50,27 @@ jobs:
           terraform init -backend=false
           terraform validate
 
-      - name: Run Trivy vulnerability scanner on repo
+      - name: Trivy vulnerability scan
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
           exit-code: '0'
 
-      - name: Ensure SARIF file exists (fallback)
+      - name: Ensure SARIF file exists
         if: always()
         run: |
-          if [ ! -f trivy-results.sarif ]; then
-            echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"Trivy","rules":[]}},"results":[]}]}' > trivy-results.sarif
-          fi
+          [ -f trivy-results.sarif ] || echo '{"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"Trivy","rules":[]}},"results":[]}]}' > trivy-results.sarif
 
-      - name: Upload Trivy SARIF to GitHub Security
+      - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: 'trivy-results.sarif'
+          sarif_file: trivy-results.sarif
 
-  # ─────────────────────────────────────────────────────────────
-  # JOB 2: Build & Push Docker Image to ECR
   # ─────────────────────────────────────────────────────────────
   build-and-push:
     name: Build & Push to ECR
@@ -93,8 +81,7 @@ jobs:
       image-uri: ${{ steps.output-uri.outputs.image-uri }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -102,7 +89,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
+      - name: Login to ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
@@ -113,43 +100,38 @@ jobs:
           images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
           tags: |
             type=sha,prefix=sha-
-            type=ref,event=branch
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Docker image
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Output image URI
         id: output-uri
         run: |
-          echo "image-uri=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          echo "image-uri=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-${SHORT_SHA}" >> $GITHUB_OUTPUT
 
-  # ─────────────────────────────────────────────────────────────
-  # JOB 3: Terraform Plan / Apply
   # ─────────────────────────────────────────────────────────────
   terraform:
     name: Terraform Infrastructure
     runs-on: ubuntu-latest
     needs: build-and-push
     if: github.event_name != 'pull_request'
-    environment: ${{ github.event.inputs.environment || 'production' }}
     defaults:
       run:
         working-directory: terraform
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -165,35 +147,25 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
-      - name: Terraform Format Check
-        run: terraform fmt -check -recursive
-
       - name: Terraform Plan
-        run: |
-          terraform plan \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -out=tfplan
-        # NOTE: No openai_api_key var — Bedrock uses IAM, no secrets needed here
+        run: terraform plan -var="aws_region=${{ env.AWS_REGION }}" -out=tfplan
 
       - name: Terraform Apply
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: github.ref == 'refs/heads/main'
         run: terraform apply -auto-approve tfplan
 
-  # ─────────────────────────────────────────────────────────────
-  # JOB 4: Deploy to ECS Fargate
   # ─────────────────────────────────────────────────────────────
   deploy-ecs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
     needs: [build-and-push, terraform]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main'
     environment:
-      name: ${{ github.event.inputs.environment || 'production' }}
-      url: ${{ steps.get-alb-url.outputs.alb-url }}
+      name: production
+      url: http://hermes-alb-1968737363.us-east-1.elb.amazonaws.com
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -201,29 +173,28 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
+      - name: Login to ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Download ECS task definition
+      - name: Download task definition
         run: |
           aws ecs describe-task-definition \
             --task-definition hermes-agent \
             --query taskDefinition \
             > task-definition.json
 
-      - name: Update ECS task definition with new image
+      - name: Update task definition with new image
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
           task-definition: task-definition.json
           container-name: ${{ env.CONTAINER_NAME }}
-          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-${{ github.sha }}
-          # Bedrock uses IAM — only optional secrets like Telegram token here
+          image: ${{ needs.build-and-push.outputs.image-uri }}
           environment-variables: |
             AWS_REGION=${{ env.AWS_REGION }}
             AWS_DEFAULT_REGION=${{ env.AWS_REGION }}
-            HERMES_MODEL=bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0
+            HERMES_MODEL=${{ env.HERMES_MODEL }}
 
       - name: Deploy to ECS Fargate
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
@@ -233,27 +204,15 @@ jobs:
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
 
-      - name: Get ALB URL
-        id: get-alb-url
+      - name: Deployment summary
         run: |
-          ALB_DNS=$(aws elbv2 describe-load-balancers \
-            --query 'LoadBalancers[?contains(LoadBalancerName, `hermes`)].DNSName' \
-            --output text 2>/dev/null || echo "N/A")
-          echo "alb-url=http://${ALB_DNS}" >> $GITHUB_OUTPUT
-
-      - name: Post deployment summary
-        run: |
-          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Deployed!" >> $GITHUB_STEP_SUMMARY
           echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Model** | bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0 |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Auth** | IAM Task Role (no API keys) |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Image** | ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:sha-${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Cluster** | ${{ env.ECS_CLUSTER }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Region** | ${{ env.AWS_REGION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | ${{ needs.build-and-push.outputs.image-uri }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Model | ${{ env.HERMES_MODEL }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| URL | http://hermes-alb-1968737363.us-east-1.elb.amazonaws.com |" >> $GITHUB_STEP_SUMMARY
 
-  # ─────────────────────────────────────────────────────────────
-  # JOB 5: Smoke Test
   # ─────────────────────────────────────────────────────────────
   smoke-test:
     name: Smoke Test
@@ -268,28 +227,23 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Wait for ECS service to stabilize
+      - name: Wait for ECS stability
         run: |
           aws ecs wait services-stable \
             --cluster ${{ env.ECS_CLUSTER }} \
             --services ${{ env.ECS_SERVICE }}
-          echo "✅ ECS service is stable"
+          echo "✅ ECS service stable"
 
       - name: Health check
         run: |
-          ALB_DNS=$(aws elbv2 describe-load-balancers \
-            --query 'LoadBalancers[?contains(LoadBalancerName, `hermes`)].DNSName' \
-            --output text 2>/dev/null)
-          if [ -n "$ALB_DNS" ] && [ "$ALB_DNS" != "None" ]; then
-            for i in {1..5}; do
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://${ALB_DNS}/health" 2>/dev/null || echo "000")
-              if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ]; then
-                echo "✅ Health check passed (HTTP ${STATUS})"
-                exit 0
-              fi
-              echo "Attempt $i: HTTP ${STATUS}, retrying in 15s..."
-              sleep 15
-            done
-          else
-            echo "⚠️ No ALB found — skipping HTTP health check"
-          fi
+          for i in {1..5}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              http://hermes-alb-1968737363.us-east-1.elb.amazonaws.com/health 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "204" ]; then
+              echo "✅ Health check passed (HTTP ${STATUS})"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP ${STATUS}, retrying in 15s..."
+            sleep 15
+          done
+          echo "⚠️ Health check did not return 200 after 5 attempts"

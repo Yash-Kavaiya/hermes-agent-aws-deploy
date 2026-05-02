@@ -1,20 +1,19 @@
 ###############################################################
 # hermes-config.yaml
-# Hermes Agent configuration — mounted into the container.
-# Using AWS Bedrock — no API key needed, auth via IAM role.
+# Using AWS Bedrock — auth via IAM Task Role, no API key needed.
 ###############################################################
 
 # ── Model ─────────────────────────────────────────────────
-# AWS Bedrock model IDs:
-#   bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0   (Claude 3.5 Sonnet v2)
-#   bedrock:anthropic.claude-3-5-haiku-20241022-v1:0    (Claude 3.5 Haiku — faster/cheaper)
+# Active Bedrock model IDs (as of May 2026):
+#   bedrock:anthropic.claude-3-5-sonnet-20240620-v1:0   (Claude 3.5 Sonnet — active)
+#   bedrock:anthropic.claude-3-5-haiku-20241022-v1:0    (Claude 3.5 Haiku)
 #   bedrock:anthropic.claude-3-opus-20240229-v1:0       (Claude 3 Opus)
 #   bedrock:amazon.nova-pro-v1:0                        (Amazon Nova Pro)
 #   bedrock:amazon.nova-lite-v1:0                       (Amazon Nova Lite)
 #   bedrock:meta.llama3-70b-instruct-v1:0               (Llama 3 70B)
-model: "bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0"
+model: "bedrock:anthropic.claude-3-5-sonnet-20240620-v1:0"
 
-# ── Gateway (web / messaging) ───────────────────────────
+# ── Gateway ───────────────────────────────────────────────
 gateway:
   host: "0.0.0.0"
   port: 8080
@@ -28,17 +27,14 @@ memory:
   enabled: true
   autosave_interval: 30
 
-# ── Terminal backend ────────────────────────────────────
 terminal_backend: "local"
 
-# ── Tools ────────────────────────────────────────────────
 tools:
   web_search: true
   browser: false
   image_gen: false
   tts: false
 
-# ── Skills ──────────────────────────────────────────────
 skills:
   auto_create: true
   auto_improve: true
