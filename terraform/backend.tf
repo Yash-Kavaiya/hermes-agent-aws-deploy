@@ -5,7 +5,7 @@
 terraform {
   backend "s3" {
     # Replace with your actual S3 bucket created by bootstrap script
-    bucket         = "hermes-terraform-state-REPLACE_WITH_ACCOUNT_ID"
+    bucket         = "hermes-terraform-state-502682267359"
     key            = "hermes-agent/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
